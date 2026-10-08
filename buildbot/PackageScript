@@ -41,7 +41,6 @@ def CopyFiles(src, dest, files):
 
 CopyFiles('', 'addons/sourcemod/gamedata', [
   'tf2.items.txt',
-  'tf2.items.nosoop.txt',
 ])
 
 CopyFiles('pawn', 'addons/sourcemod/scripting/include', [

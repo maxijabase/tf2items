@@ -56,7 +56,7 @@ SH_DECL_HOOK2_void(IServerGameClients, ClientPutInServer, SH_NOATTRIB, 0, edict_
 #endif
 SH_DECL_MANUALHOOK4(MHook_GiveNamedItem, 0, 0, 0, CBaseEntity *, char const *, int, CEconItemView *, bool);
 
-CDetour *g_pDetourGetLoadoutItem;
+CDetour *g_pDetourGetLoadoutItem = NULL;
 
 ICvar *icvar = NULL;
 IServerGameClients *gameclients = NULL;
@@ -66,7 +66,6 @@ ConVar TF2ItemsVersion("tf2items_version", SMEXT_CONF_VERSION, FCVAR_SPONLY|FCVA
 ConVar HookTFBot("tf2items_bothook", "1", FCVAR_NONE, "Hook intelligent TF2 bots.");
 
 IGameConfig *g_pGameConf = NULL;
-IGameConfig *g_pSecondaryGameConf = NULL;
 
 int GiveNamedItem_player_Hook = 0;
 int GiveNamedItem_bot_Hook = 0;
@@ -517,17 +516,8 @@ bool TF2Items::SDK_OnLoad(char *error, size_t maxlen, bool late) {
 		return false;
 	}
 
-	if (!gameconfs->LoadGameConfigFile("tf2.items.nosoop", &g_pSecondaryGameConf, conf_error, sizeof(conf_error)))
-	{
-		if (conf_error[0])
-		{
-			snprintf(error, maxlen, "Could not read tf2.items.txt: %s\n", conf_error);
-		}
-		return false;
-	}
-
 	int iOffset;
-	if (!g_pGameConf->GetOffset("GiveNamedItem", &iOffset) && !g_pSecondaryGameConf->GetOffset("GiveNamedItem", &iOffset))
+	if (!g_pGameConf->GetOffset("GiveNamedItem", &iOffset))
 	{
 		snprintf(error, maxlen, "Could not find offset for GiveNamedItem");
 		return false;
@@ -535,8 +525,8 @@ bool TF2Items::SDK_OnLoad(char *error, size_t maxlen, bool late) {
 		SH_MANUALHOOK_RECONFIGURE(MHook_GiveNamedItem, iOffset, 0, 0);
 		g_pSM->LogMessage(myself, "\"GiveNamedItem\" offset = %d", iOffset);
 	}
-	
-	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pSecondaryGameConf);
+
+	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 	g_pDetourGetLoadoutItem = DETOUR_CREATE_MEMBER(CTFPlayer_GetLoadoutItem, "GetLoadoutItem");
 
 	// If it's a late load, there might be the chance there are players already on the server. Just
@@ -608,7 +598,10 @@ bool TF2Items::SDK_OnLoad(char *error, size_t maxlen, bool late) {
 	g_pForwardGiveItem_Post = g_pForwards->CreateForward("TF2Items_OnGiveNamedItem_Post", ET_Ignore, 6, NULL, Param_Cell, Param_String, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	g_pForwardGetLoadoutItem = g_pForwards->CreateForward("TF2Items_OnGetLoadoutItem", ET_Hook, 4, NULL, Param_Cell, Param_Cell, Param_Cell, Param_CellByRef);
 
-	g_pDetourGetLoadoutItem->EnableDetour();
+	if (g_pDetourGetLoadoutItem != NULL)
+	{
+		g_pDetourGetLoadoutItem->EnableDetour();
+	}
 
 	return true;
 }
@@ -634,7 +627,6 @@ void TF2Items::SDK_OnUnload()
 #endif // TF2ITEMS_DEBUG_HOOKING
 
 	gameconfs->CloseGameConfigFile(g_pGameConf);
-	gameconfs->CloseGameConfigFile(g_pSecondaryGameConf);
 
 	g_pHandleSys->RemoveType(g_ScriptedItemOverrideHandleType, myself->GetIdentity());
 
@@ -642,7 +634,10 @@ void TF2Items::SDK_OnUnload()
 	g_pForwards->ReleaseForward(g_pForwardGiveItem_Post);
 	g_pForwards->ReleaseForward(g_pForwardGetLoadoutItem);
 	
-	g_pDetourGetLoadoutItem->DisableDetour();
+	if (g_pDetourGetLoadoutItem != NULL)
+	{
+		g_pDetourGetLoadoutItem->DisableDetour();
+	}
 }
 
 bool TF2Items::SDK_OnMetamodUnload(char *error, size_t maxlen)
