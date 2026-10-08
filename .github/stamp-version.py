@@ -28,5 +28,4 @@ for name, value in replacements.items():
     if count != 1:
         raise SystemExit(f"did not find #define {name} in {header}")
 header.write_text(text, encoding="utf-8")
-Path("product.version").write_text(f"{major}.{minor}.{patch}\n", encoding="utf-8")
 print(f"stamped {ref} -> {major}.{minor}.{patch}")
