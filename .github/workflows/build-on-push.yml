@@ -50,11 +50,12 @@ jobs:
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y clang g++-multilib gcc-multilib
-          echo "CC=clang" >> "$GITHUB_ENV"
-          echo "CXX=clang++" >> "$GITHUB_ENV"
+          sudo apt-get install -y g++-multilib gcc-multilib
+          echo "CC=clang-20" >> "$GITHUB_ENV"
+          echo "CXX=clang++-20" >> "$GITHUB_ENV"
 
       - name: Add msbuild to PATH
         if: runner.os == 'Windows'

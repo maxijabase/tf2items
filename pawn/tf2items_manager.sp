@@ -2,7 +2,6 @@
 #pragma newdecls required // Force new syntax
 // ====[ INCLUDES ]====================================================
 #include <sourcemod>
-#define REQUIRE_EXTENSIONS
 #include <tf2items>
 
 // ====[ CONSTANTS ]===================================================
