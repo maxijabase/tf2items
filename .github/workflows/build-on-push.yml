@@ -1,232 +1,174 @@
-# Builds when a release is published.
-name: Build Workflow
+name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
-  create_release:
-    name: Create release
-    runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[ci skip]')"
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Get short SHA
-        id: vars
-        run: |
-          echo "GITHUB_SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_ENV
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: r${{ github.run_number }}-${{ github.ref_name }}
-          release_name: Build ${{ env.GITHUB_SHA_SHORT }}
-          draft: false
-          prerelease: true
-
   build:
-    name: Build for ${{ matrix.os_short }} using sm-${{ matrix.sm_branch }}
-    needs: create_release
+    name: ${{ matrix.os_short }} ${{ matrix.target_arch }}
     runs-on: ${{ matrix.os }}
-    # skip build on '[ci skip]'
-    if: "!contains(github.event.head_commit.message, '[ci skip]')"
-
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-22.04
-          - windows-latest
-        target_arch:
-          - x86
-          - x86_64
         include:
-          - meta_branch: "1.12-dev"
-            sm_branch: "1.12-dev"
-            spcomp_version: "1.11.x"
-
           - os: ubuntu-22.04
             target_arch: x86
             os_short: linux
-
           - os: ubuntu-22.04
             target_arch: x86_64
             os_short: linux64
-
           - os: windows-latest
             target_arch: x86
             os_short: win
             vs_dev_arch: x86
-
           - os: windows-latest
             target_arch: x86_64
             os_short: win64
             vs_dev_arch: x64
 
     steps:
-      - name: Prepare env
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Stamp version from tag
+        working-directory: src
         shell: bash
-        run: |
-          echo "GITHUB_SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_ENV
-          
-      - name: Install (Linux)
+        run: python .github/stamp-version.py
+
+      - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y clang g++-multilib
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "CXX=clang++" >> $GITHUB_ENV
-          
-      - name: Add msbuild to PATH (Windows)
+          sudo apt-get install -y clang g++-multilib gcc-multilib
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      - name: Add msbuild to PATH
         if: runner.os == 'Windows'
-        uses: microsoft/setup-msbuild@v1.1
-        
-      - name: Install (Windows)
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up the Visual Studio environment
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          :: See https://github.com/microsoft/vswhere/wiki/Find-VC
           for /f "usebackq delims=*" %%i in (`vswhere -latest -property installationPath`) do (
             call "%%i"\Common7\Tools\vsdevcmd.bat -arch=${{ matrix.vs_dev_arch }} -host_arch=x64
           )
-          
-          :: Loop over all environment variables and make them global.
           for /f "delims== tokens=1,2" %%a in ('set') do (
             echo>>"%GITHUB_ENV%" %%a=%%b
           )
-          
 
-      - name: Fetch Metamod:Source ${{ matrix.meta_branch }}
-        uses: actions/checkout@v2
+      - name: Set up SourcePawn
+        uses: rumblefrog/setup-sp@v1.2.2
+        with:
+          version: "1.12.x"
+          no-spcomp-proxy: true
+
+      - name: Fetch Metamod:Source 1.12-dev
+        uses: actions/checkout@v4
         with:
           repository: alliedmodders/metamod-source
-          ref: ${{ matrix.meta_branch }}
+          ref: 75dd7b26fe92e535a11f0318ead73c3e05130d0b
           path: mmsource
 
-      - name: Fetch SourceMod ${{ matrix.sm_branch }}
-        uses: actions/checkout@v2
+      - name: Fetch SourceMod 1.12-dev
+        uses: actions/checkout@v4
         with:
           repository: alliedmodders/sourcemod
-          ref: ${{ matrix.sm_branch }}
+          ref: 03865e00cc124221122ae9798ad38998566f9a2b
           path: sourcemod
           submodules: recursive
 
-      - name: Fetch SDKs
-        shell: bash
-        run: |
-          git clone --mirror https://github.com/alliedmodders/hl2sdk hl2sdk-proxy-repo
-          sdks=(tf2)
-          for sdk in "${sdks[@]}"
-          do
-            git clone hl2sdk-proxy-repo -b $sdk hl2sdk-$sdk
-          done
+      - name: Fetch HL2SDK tf2
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/hl2sdk
+          ref: 631a7b6c0cbbb6941cf22e434620911a0bdfd478
+          path: hl2sdk-tf2
 
-      - name: Fetch SDK Manifests
-        uses: actions/checkout@v2
+      - name: Fetch HL2SDK manifests
+        uses: actions/checkout@v4
         with:
           repository: alliedmodders/hl2sdk-manifests
+          ref: 97c5df831be1cc5e037e5242a9c1d4a049cc61c8
           path: hl2sdk-manifests
 
-      - name: Checkout AMBuild
-        uses: actions/checkout@v3
+      - name: Fetch AMBuild
+        uses: actions/checkout@v4
         with:
           repository: alliedmodders/ambuild
+          ref: 01212cb57c96561f664b6dfb2ee10e66de6f81e4
           path: ambuild
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Set up spcomp
-        uses: rumblefrog/setup-sp@v1.2.2
-        with:
-          version: ${{ matrix.spcomp_version }}
-          no-spcomp-proxy: true
-
-      - name: Checkout ambuild
-        run: |
-          python -m pip install wheel
-          pip install git+https://github.com/alliedmodders/ambuild
-
-      - name: Checkout project
-        uses: actions/checkout@v3
-        with:
-          path: src
-
-      - name: Build Files
+      - name: Build
         working-directory: src
+        shell: bash
         run: |
+          python -m pip install "${GITHUB_WORKSPACE}/ambuild"
           mkdir build
           cd build
-          python3 ../configure.py --sdks=tf2 --sm-path="${{ github.workspace }}/sourcemod" --mms-path="${{ github.workspace }}/mmsource" --symbol-files --enable-optimize --hl2sdk-manifest-path="${{ github.workspace }}/hl2sdk-manifests" --targets ${{ matrix.target_arch }}
+          python ../configure.py \
+            --sdks=tf2 \
+            --enable-optimize \
+            --sm-path="${GITHUB_WORKSPACE}/sourcemod" \
+            --mms-path="${GITHUB_WORKSPACE}/mmsource" \
+            --hl2sdk-manifest-path="${GITHUB_WORKSPACE}/hl2sdk-manifests" \
+            --targets "${{ matrix.target_arch }}"
           ambuild
 
-      - name: Upload Build Artifact
-        id: upload-build-artifact
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os_short }}-${{ matrix.target_arch }}
           path: src/build/package
+          if-no-files-found: error
 
-  combine_packages:
-    name: Upload assets for for ${{ matrix.os_short }}
-    needs: [build, create_release]
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-        include:
-          - os: ubuntu-latest
-            os_short: linux
-            package_ext: .tar.gz
-          - os: windows-latest
-            os_short: win
-            package_ext: zip
-
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
     steps:
-      - name: Download Build Artifacts
+      - name: Download Linux packages
         uses: actions/download-artifact@v4
         with:
-          path: src/build/package
-          pattern: ${{ matrix.os_short }}*
+          pattern: linux*
+          path: dist/linux
           merge-multiple: true
 
-      - name: Build Package (Windows)
-        if: runner.os == 'Windows'
-        working-directory: src/build
-        shell: cmd
-        run: |
-          pushd package
-          7z a -r "../package.${{ matrix.package_ext }}" addons
-          popd
-
-      - name: Build Package (Linux)
-        if: runner.os == 'Linux'
-        working-directory: src/build
-        shell: bash
-        run: |
-          pushd package
-          tar -czf "../package.${{ matrix.package_ext }}" --owner=0 --group=0 addons
-          popd
-
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download Windows packages
+        uses: actions/download-artifact@v4
         with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: src/build/package.${{ matrix.package_ext }}
-          asset_name: package.${{ matrix.package_ext }}
-          asset_content_type: application/octet-stream
+          pattern: win*
+          path: dist/windows
+          merge-multiple: true
+
+      - name: Pack archives
+        run: |
+          set -eu
+          find dist -maxdepth 3 -type d -print
+          test -d dist/linux/addons
+          test -d dist/windows/addons
+          tar -C dist/linux -czf "tf2items-${GITHUB_REF_NAME}-linux.tar.gz" addons
+          (cd dist/windows && zip -r "../../tf2items-${GITHUB_REF_NAME}-windows.zip" addons)
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          files: |
+            tf2items-${{ github.ref_name }}-linux.tar.gz
+            tf2items-${{ github.ref_name }}-windows.zip
